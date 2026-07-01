@@ -94,7 +94,7 @@ struct Robot
     vision_msgs::msg::Point2D goalpost_px_position;
     geometry_msgs::msg::Vector3Stamped imu_gyro;
     float imu_yaw_rad = 0.0;
-    
+    float imu_mag = 0.0;    
 
 };
 

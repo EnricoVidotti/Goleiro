@@ -14,10 +14,11 @@
 #include "Walking.h"
 #include "QuadraticStateTransform.h"
 #include <unistd.h>
+#include <cassert>
 
 using namespace Robot;
 
-#define LOG_BALANCE 0
+#define LOG_BALANCE 1
 
 #define PI (3.14159265)
 
@@ -53,7 +54,7 @@ Walking::Walking()
  Y_MOVE_AMPLITUDE = 0;
  A_MOVE_AMPLITUDE = 0; 
  A_MOVE_AIM_ON = false;
- BALANCE_ENABLE = false;
+ BALANCE_ENABLE = true;
  LOWER_VELADJ_LIMIT = -8;
  UPPER_VELADJ_LIMIT = 3;
  speedAdj = 0;
@@ -413,7 +414,7 @@ void Walking::Process()
  double TIME_UNIT = MotionModule::TIME_UNIT;
  // R_HIP_YAW, R_HIP_ROLL, R_HIP_PITCH, R_KNEE, R_ANKLE_PITCH, R_ANKLE_ROLL, L_HIP_YAW, L_HIP_ROLL, L_HIP_PITCH, L_KNEE, L_ANKLE_PITCH, L_ANKLE_ROLL, R_ARM_SWING, L_ARM_SWING
 // int dir[14] = { -1, 1, 1, 1, -1, 1, -1, 1, -1, -1, 1, 1, 1, -1 }; // Robos Antigos
- int dir[14] = { -1, -1, 1, 1, 1, 1, -1, -1, -1, -1, -1, 1, 1, -1 }; // Robos Novos
+ int dir[14] = { -1, -1, 1, 1, -1, 1, -1, -1, -1, -1, 1, 1, 1, -1 }; // Robos Novos
  double initAngle[14] = { 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 };
  int outValue[14];
 
@@ -692,8 +693,8 @@ if (L_swing) {
 
  double rlGyroErr = MotionStatus::RL_GYRO;
  double fbGyroErr = MotionStatus::FB_GYRO;
- //printf("IMU %f\n", fbGyroErr);
- //printf("IMU 2 %f\n", rlGyroErr);
+ printf("IMU %f\n", fbGyroErr);
+ printf("IMU 2 %f\n", rlGyroErr);
 #ifdef MX28_1024
  outValue[1] += dir[1] * rlGyroErr * BALANCE_HIP_ROLL_GAIN; // R_HIP_ROLL
  outValue[7] += dir[7] * rlGyroErr * BALANCE_HIP_ROLL_GAIN; // L_HIP_ROLL
@@ -764,7 +765,7 @@ double Walking::splineBalance(double angle, double vel, double gain)
  double offset = 1000.0 * gain * (cmd.x - angle);
 
 #if LOG_BALANCE
- //fprintf(m_balanceLog, "%5.3f %5.3f %5.3f %5.3f\n", angle, vel, offset, cmd.t);
+ fprintf(m_balanceLog, "%5.3f %5.3f %5.3f %5.3f\n", angle, vel, offset, cmd.t);
 #endif
 return offset;
 } 

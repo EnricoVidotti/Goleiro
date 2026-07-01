@@ -66,6 +66,7 @@ class DecisionNode : public rclcpp::Node
         void listener_callback_goalpost_count(const std_msgs::msg::Int32::SharedPtr goalpost_count); // quantas traves o robo esta vendo
         void listener_callback_goalpost_px(const vision_msgs::msg::Point2D::SharedPtr goalpost_px_position); // posição x das traves
         void listener_callback_imu_rpy(const geometry_msgs::msg::Vector3Stamped::SharedPtr rpy);
+        void listener_callback_imu_mag(const geometry_msgs::msg::Vector3Stamped::SharedPtr rpy);
         void set_neck_position(); // fazer o robo olhar pra cima
         void look_right(); // fazer o robo olhar pra direita
         void look_down_to_ball(); // fazer o robo olhar pra baixo
@@ -132,6 +133,7 @@ class DecisionNode : public rclcpp::Node
         rclcpp_action::Client<ControlActionMsg>::SendGoalOptions send_goal_options = rclcpp_action::Client<ControlActionMsg>::SendGoalOptions();
 
         rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr imu_rpy_subscriber_;
+        rclcpp::Subscription<geometry_msgs::msg::Vector3Stamped>::SharedPtr imu_mag_subscriber_;
 
         void goal_response_callback(const GoalHandleControl::SharedPtr & goal_handle);
         void feedback_callback(

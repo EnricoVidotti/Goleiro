@@ -11,8 +11,10 @@ from math import hypot
 import time
 from cv_bridge import CvBridge
 import torch
+import math
 
 from custom_interfaces.msg import Vision
+from custom_interfaces.msg import JointState
 from vision_msgs.msg import Point2D
 from sensor_msgs.msg import Image
 
@@ -20,7 +22,7 @@ from .submodules.utils          import draw_lines, position
 from .submodules.ClassConfig    import *
 from .submodules.Client         import Client
 from .submodules.ImageGetter    import ImageGetter
-from .submodules.image          import findBall, findGoalpost, resize_image
+from .submodules.image          import findBall, findGoalpost, findL, findT, findX, resize_image
 
 
 class BallDetection(Node):
@@ -39,7 +41,7 @@ class BallDetection(Node):
         self.declare_parameter("device", "cpu")
         self.device = self.get_parameter("device").get_parameter_value().string_value
 
-        self.declare_parameter("model", f"{os.path.dirname(os.path.realpath(__file__))}/weights/best_openvino_model/")
+        self.declare_parameter("model", f"{os.path.dirname(os.path.realpath(__file__))}/weights/LTX.pt") # changed - era: /best_openvino_model/
         self.model = YOLO(self.get_parameter("model").get_parameter_value().string_value) # Load model
         self.value_classes = self.get_classes()  # define antes de usar
         self.get_logger().info(f"CLASSES DO MODELO: {self.value_classes}")
@@ -85,6 +87,18 @@ class BallDetection(Node):
         self.ball_px_position_publisher_ = self.create_publisher(Point2D, '/ball_px_position', 2)
         self.goalpost_center_publisher_ = self.create_publisher(Point2D, '/goalpost_center_px', 2)
         self.goalpost_count_publisher_ = self.create_publisher(Int32, '/goalpost_count', 2)
+        # Added:
+        self.l_position_publisher_ = self.create_publisher(Vision, '/l_position', 10)
+        self.l_px_position_publisher_ = self.create_publisher(Point2D, '/l_px_position', 2)
+        self.l_count_publisher_ = self.create_publisher(Int32, '/l_count', 2)
+
+        self.t_position_publisher_ = self.create_publisher(Vision, '/t_position', 10)
+        self.t_px_position_publisher_ = self.create_publisher(Point2D, '/t_px_position', 2)
+        self.t_count_publisher_ = self.create_publisher(Int32, '/t_count', 2)
+
+        self.x_position_publisher_ = self.create_publisher(Vision, '/x_position', 10)
+        self.x_px_position_publisher_ = self.create_publisher(Point2D, '/x_px_position', 2)
+        self.x_count_publisher_ = self.create_publisher(Int32, '/x_count', 2)
 
         # state vars
         self.cont_real_ball_detections = 0
@@ -108,8 +122,26 @@ class BallDetection(Node):
 
         self.ball_pos_area = Vision()
         self.goalpost_pos_area = Vision()
+        # Added:
+        self.l_pos_area = Vision()
+        self.t_pos_area = Vision()
+        self.x_pos_area = Vision()
         
         self.cont_real_detections = 0
+        # Added: 
+        self.cont_real_l_detections = 0
+        self.cont_real_t_detections = 0
+        self.cont_real_x_detections = 0
+
+        self.camera_height = 0.05   # altura do motor do pescoço até a câmera (m)
+        self.robot_height  = 0.695   # altura do robô até o pescoço (m)
+
+        self.neck_subscription = self.create_subscription(
+            JointState,
+            '/all_joints_position',  # tópico correto
+            self.topic_callback_neck,
+            10
+        )
 
         if self.enable_udp:
             self.client = Client(self.server_ip, self.server_port)
@@ -174,11 +206,18 @@ class BallDetection(Node):
             # predict & process
             self.results = self.predict_image(resize_image(frame, self.img_qlty))  # predict image
 
+            # Print detected IDs
+            self.print_detected_ids(self.results)
+
             if self.show_divisions:
                 frame = draw_lines(frame, self.config)  # Draw camera divisions
 
             frame = self.ball_detection(frame, self.results)
             frame = self.goalpost_detection(frame, self.results)
+            # Added:
+            frame = self.l_detection(frame, self.results)
+            frame = self.t_detection(frame, self.results)
+            frame = self.x_detection(frame, self.results)
 
             try:
                 # The original code checks filtered_ball_position.size != 0 — keep similar behavior.
@@ -194,9 +233,9 @@ class BallDetection(Node):
                 except Exception:
                     self.get_logger().debug("Não está publicando no servidor udp")
 
-            # Show
-            #cv2.imshow('Ball', frame)
-            #cv2.waitKey(1)
+            #Show
+            cv2.imshow('Ball', frame)
+            cv2.waitKey(1)
 
             # If you want to also publish the original frame as sensor_msgs/Image, uncomment:
             # try:
@@ -208,8 +247,30 @@ class BallDetection(Node):
         except Exception as e:
             self.get_logger().error(f"Erro no timer_callback: {str(e)}")
 
+    # changed - era: 
+    # def predict_image(self, img):
+    #     results = self.model(img, device=self.device, conf=0.5, max_det=3, verbose=False)        
+    #     return results[0]
+
+    def print_detected_ids(self, results):
+        """Printa os IDs das classes detectadas no frame atual"""
+        if results.boxes is None or len(results.boxes) == 0:
+            return
+        
+        detected_classes = results.boxes.cls.cpu().numpy()
+        unique_classes = np.unique(detected_classes)
+        
+        # Inverte o dicionário value_classes para pegar nome a partir do ID
+        id_to_name = {v: k for k, v in self.value_classes.items()}
+        
+        detected_names = [id_to_name.get(int(cls_id), f"Unknown_{int(cls_id)}") for cls_id in unique_classes]
+        
+        if len(detected_names) > 0:
+            self.get_logger().info(f"🔍 Detectados: {', '.join(detected_names)} | IDs: {[int(x) for x in unique_classes]}")
+
     def predict_image(self, img):
-        results = self.model(img, device=self.device, conf=0.5, max_det=3, verbose=False)        
+        # Aumenta max_det para 15-20 detecções
+        results = self.model(img, device=self.device, conf=0.35, max_det=13, verbose=False)
         return results[0]
 
     def goalpost_detection(self, img, results):
@@ -414,6 +475,251 @@ class BallDetection(Node):
     # If you used decide_kick somewhere else in your project, keep it. Otherwise
     # add your decide_kick implementation here or import it.
 
+    # Added: ________________________________________________________________________________________________________________________________________________________
+    def l_detection(self, img, results):
+        img_cp = img.copy()
+        try:
+            img_cp, l_px_positions = findL(img_cp, results, self.value_classes)
+            
+            if not l_px_positions or len(l_px_positions) == 0:
+                l_area = Vision()
+                l_area.detected = False
+                self.l_position_publisher_.publish(l_area)
+                
+                l_count_msg = Int32()
+                l_count_msg.data = 0
+                self.l_count_publisher_.publish(l_count_msg)
+                return img_cp
+            
+            # Publica cada L detectado
+            for l_px_pos in l_px_positions:
+                l_px_pos_msg = Point2D()
+                l_px_pos_msg.x = float(l_px_pos[0])
+                l_px_pos_msg.y = float(l_px_pos[1])
+                self.l_px_position_publisher_.publish(l_px_pos_msg)
+
+                dist = self.get_landmark_dist(l_px_pos, img_cp)
+                ang  = self.get_landmark_ang(l_px_pos, img_cp)
+
+                if dist is not None and ang is not None:
+                    self.get_logger().info(
+                        f"[L] x={l_px_pos[0]:.1f}, y={l_px_pos[1]:.1f} | dist={dist:.2f} m | ang={math.degrees(ang):.2f}°"
+                    )
+                new_l_pos_area = self.get_landmark_pos_area(l_px_pos)  # Reutiliza função genérica
+                self.l_pos_area_filter(new_l_pos_area, 1)
+            
+            l_count_msg = Int32()
+            l_count_msg.data = len(l_px_positions)
+            self.l_count_publisher_.publish(l_count_msg)
+            
+        except Exception as e:
+            self.get_logger().error(f"Erro na l_detection: {str(e)}")
+        
+        return img_cp
+
+    def l_pos_area_filter(self, not_filtered_l_pos, opt):
+        if opt == 0:
+            self.l_pos_area = not_filtered_l_pos
+        
+        elif opt == 1:
+            if not_filtered_l_pos == self.l_pos_area:
+                self.cont_real_l_detections += 1
+            else:
+                self.cont_real_l_detections = 0
+                self.l_pos_area = not_filtered_l_pos
+            
+            if self.cont_real_l_detections > 2:
+                self.l_position_publisher_.publish(self.l_pos_area)
+
+
+
+    def t_detection(self, img, results):
+        img_cp = img.copy()
+        
+        try:
+            img_cp, t_px_positions = findT(img_cp, results, self.value_classes)
+            
+            if not t_px_positions or len(t_px_positions) == 0:
+                t_area = Vision()
+                t_area.detected = False
+                self.t_position_publisher_.publish(t_area)
+                
+                t_count_msg = Int32()
+                t_count_msg.data = 0
+                self.t_count_publisher_.publish(t_count_msg)
+                return img_cp
+            
+            # Publica cada T detectado
+            for t_px_pos in t_px_positions:
+                t_px_pos_msg = Point2D()
+                t_px_pos_msg.x = float(t_px_pos[0])
+                t_px_pos_msg.y = float(t_px_pos[1])
+                self.t_px_position_publisher_.publish(t_px_pos_msg)
+
+                dist = self.get_landmark_dist(t_px_pos, img_cp)
+                ang  = self.get_landmark_ang(t_px_pos, img_cp)
+
+                if dist is not None and ang is not None:
+                    self.get_logger().info(
+                        f"[T] x={t_px_pos[0]:.1f}, y={t_px_pos[1]:.1f} | dist={dist:.2f} m | ang={math.degrees(ang):.2f}°"
+                    )
+                                
+                new_t_pos_area = self.get_landmark_pos_area(t_px_pos)  # Reutiliza função genérica
+                self.t_pos_area_filter(new_t_pos_area, 1)
+            
+            t_count_msg = Int32()
+            t_count_msg.data = len(t_px_positions)
+            self.t_count_publisher_.publish(t_count_msg)
+            
+        except Exception as e:
+            self.get_logger().error(f"Erro na t_detection: {str(e)}")
+        
+        return img_cp
+        
+        
+    def t_pos_area_filter(self, not_filtered_t_pos, opt):
+        if opt == 0:
+            self.t_pos_area = not_filtered_t_pos
+        
+        elif opt == 1:
+            if not_filtered_t_pos == self.t_pos_area:
+                self.cont_real_t_detections += 1
+            else:
+                self.cont_real_t_detections = 0
+                self.t_pos_area = not_filtered_t_pos
+            
+            if self.cont_real_t_detections > 2:
+                self.t_position_publisher_.publish(self.t_pos_area)
+    
+        
+    def x_detection(self, img, results):
+        img_cp = img.copy()
+        
+        try:
+            img_cp, x_px_positions = findX(img_cp, results, self.value_classes)
+            
+            if not x_px_positions or len(x_px_positions) == 0:
+                x_area = Vision()
+                x_area.detected = False
+                self.x_position_publisher_.publish(x_area)
+                
+                x_count_msg = Int32()
+                x_count_msg.data = 0
+                self.x_count_publisher_.publish(x_count_msg)
+                return img_cp
+            
+            # Publica cada X detectado
+            for x_px_pos in x_px_positions:
+                x_px_pos_msg = Point2D()
+                x_px_pos_msg.x = float(x_px_pos[0])
+                x_px_pos_msg.y = float(x_px_pos[1])
+                self.x_px_position_publisher_.publish(x_px_pos_msg)
+                
+                new_x_pos_area = self.get_landmark_pos_area(x_px_pos)  # Reutiliza função genérica
+                self.x_pos_area_filter(new_x_pos_area, 1)
+            
+            x_count_msg = Int32()
+            x_count_msg.data = len(x_px_positions)
+            self.x_count_publisher_.publish(x_count_msg)
+            
+        except Exception as e:
+            self.get_logger().error(f"Erro na x_detection: {str(e)}")
+        
+        return img_cp
+
+    def x_pos_area_filter(self, not_filtered_x_pos, opt):
+        if opt == 0:
+            self.x_pos_area = not_filtered_x_pos
+        
+        elif opt == 1:
+            if not_filtered_x_pos == self.x_pos_area:
+                self.cont_real_x_detections += 1
+            else:
+                self.cont_real_x_detections = 0
+                self.x_pos_area = not_filtered_x_pos
+            
+            if self.cont_real_x_detections > 2:
+                self.x_position_publisher_.publish(self.x_pos_area)
+
+    def get_landmark_pos_area(self, landmark_px_pos):
+        """Função genérica para calcular posição de landmarks (L, T, X)"""
+        landmark_pos = Vision()
+        landmark_pos.detected = True
+        landmark_pos.left = False
+        landmark_pos.center = False
+        landmark_pos.right = False
+        landmark_pos.close = False
+        landmark_pos.med = False
+        landmark_pos.far = False
+
+        x = landmark_px_pos[0]
+        y = landmark_px_pos[1]
+
+        # Lado horizontal
+        if x < self.config.x_left:
+            landmark_pos.left = True
+        elif x > self.config.x_center:
+            landmark_pos.right = True
+        else:
+            landmark_pos.center = True
+
+        # Distância vertical
+        if y < self.config.y_longe:
+            landmark_pos.far = True
+        elif y > self.config.y_chute:
+            landmark_pos.close = True
+        else:
+            landmark_pos.med = True
+
+        return landmark_pos
+        
+    def get_landmark_dist(self, landmark_px_pos, img):
+        if self.neck_up is None:
+            self.get_logger().warn("[DIST] Posição do pescoço ainda não recebida.")
+            return None
+
+            # Motor 20: ângulo vertical da cabeça
+            angle_deg = ((self.neck_up - 1024) * 90) / 1024
+            angle_rad = math.radians(angle_deg)
+
+            y_cam        = self.camera_height * math.sin(angle_rad)
+            x_cam        = self.camera_height * math.cos(angle_rad)
+            total_height = self.robot_height + y_cam
+
+            dist_m = math.tan(angle_rad) * total_height + x_cam
+
+            self.get_logger().info(
+                f"[DIST] neck_up={self.neck_up} | angle={angle_deg:.2f}° | dist={dist_m:.3f} m"
+            )
+            return dist_m
+
+
+    def get_landmark_ang(self, landmark_px_pos, img):
+        if self.neck_sides is None:
+            self.get_logger().warn("[ANG] Posição do pescoço ainda não recebida.")
+            return None
+
+        # Motor 19: ângulo horizontal da cabeça — mesma transformação do motor 20
+        angle_deg = ((self.neck_sides - 1024) * 90) / 1024
+        angle_rad = math.radians(angle_deg)
+
+        self.get_logger().info(
+            f"[ANG] neck_sides={self.neck_sides} | angle={angle_deg:.2f}°"
+        )
+        return angle_rad
+        
+    def topic_callback_neck(self, msg):
+        try:
+            self.neck_sides = msg.info[19]
+            self.neck_up    = msg.info[20]
+            self.get_logger().info(
+                f"[NECK] Motor 19 (horizontal): {self.neck_sides} | Motor 20 (vertical): {self.neck_up}",
+                throttle_duration_sec=1.0
+            )
+        except (IndexError, AttributeError) as e:
+            self.get_logger().warn(f"[NECK] Erro ao ler posição do pescoço: {e}")
+    # _________________________________________________________________________________________________________________________________________________________
+
 def main(args=None):
     rclpy.init(args=args)
     node = None  # inicializa como None
@@ -437,4 +743,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-

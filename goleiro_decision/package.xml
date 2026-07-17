@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>goleiro_decision</name>
+  <version>0.0.0</version>
+  <description>
+    Pacote de decisão/localização do robô goleiro (fusão dos antigos pacotes
+    "posicao" e "decision"). Contém dois executáveis:
+    - localization_node: assina /l_count, /t_count, /x_count e /goalpost_count
+      do vision_pkg, filtra (mediana) e publica um resumo consolidado no
+      tópico "robot_behavior" (custom_interfaces::msg::LandmarkCount).
+    - goleiro_behavior_node: assina esse resumo, a posição dos motores do
+      pescoço (all_joints_position) e a bola (/ball_position), e decide o
+      comportamento do goleiro (goleiro_normal_game / Posicionamento / VerQueda).
+  </description>
+  <maintainer email="enricovidotti360@gmail.com">robo</maintainer>
+  <license>TODO: License declaration</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>std_msgs</depend>
+  <depend>custom_interfaces</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -16,6 +16,13 @@
 // usar na tomada de decisão.
 //
 // (Antigo pacote "posicao" / src/main.cpp, fundido em goleiro_decision.)
+//
+// NOME DO NÓ: no RoboFEI-HT_2023_SOFTWARE real já existe um pacote chamado
+// "localization" (IMU, src/main.cpp) cujo nó também se chama "localization_node"
+// — mas faz algo totalmente diferente (assina imu/rpy, publica localization_active).
+// Pra não colidir os dois no grafo ROS quando ambos os pacotes existem no mesmo
+// workspace, esse nó usa o nome "landmark_summary_node" (o executável continua
+// se chamando "localization_node", só o nome do nó ROS mudou).
 // -----------------------------------------------------------------------------------
 
 // intervalo de frames entre cada publish do resumo de landmarks
@@ -63,7 +70,7 @@ private:
 class LocalizationNode : public rclcpp::Node
 {
 public:
-    LocalizationNode() : Node("localization_node")
+    LocalizationNode() : Node("landmark_summary_node")
     {
         // vision_pkg publica, a cada frame processado, a quantidade de cada landmark
         // detectada naquele frame nos tópicos abaixo (std_msgs/Int32).
@@ -83,7 +90,7 @@ public:
         landmark_summary_publisher_ = this->create_publisher<custom_interfaces::msg::LandmarkCount>(
             "robot_behavior", 10);
 
-        RCLCPP_INFO(this->get_logger(), "Localization node has started");
+        RCLCPP_INFO(this->get_logger(), "Landmark summary node has started");
     }
 
 private:

@@ -40,10 +40,18 @@
 //   - Cada XXXX_N representa um uso distinto de "XXXX" no racional original
 //     — são mantidos como constantes separadas (podem ou não ter o mesmo
 //     valor final; isso cabe à calibração do time).
-//   - g_dive_left / g_dive_right (queda lateral) ainda não existem no enum
-//     Move real do robot_behavior.cpp — são placeholders de action_number,
-//     e o move de "levantar" usado depois (queda_get_up_move_) está fixo em
-//     g_stand_up_side para todos os casos. Ver TODOs em VerQueda().
+//   - g_dive_left / g_dive_right e g_stand_up_side_left / g_stand_up_side_right
+//     foram confirmados em RoboFEI/src/control/src/control.cpp
+//     (Control::choose_movement) e em RoboFEI/src/control/Data/motion*.json:
+//     action_number 11 = "Goalkeeper Fall Left", 12 = "Goalkeeper Fall Right",
+//     18 = "Fallen Side Left", 19 = "Fallen Side Right" (attributes.h do
+//     decision_pkg_cpp só cobria os moves de jogador de campo, por isso não
+//     tinha 11/12/19). Atenção: nos 5 motion*.json do repositório, as seções
+//     "Goalkeeper Fall Left"/"Goalkeeper Fall Right" só declaram
+//     "number of movements" (6), sem os address/position de cada passo —
+//     ou seja, o action_number já existe e está roteado no control.cpp, mas
+//     a animação de queda em si ainda não foi calibrada/gravada em nenhuma
+//     config; falta o time preencher esses passos antes de usar em campo.
 // ============================================================================
 
 #include "rclcpp/rclcpp.hpp"
@@ -71,29 +79,30 @@ enum GoleiroState
     goleiro_finding_ball_2  = 7  // de pé de novo, dentro da função FindBall2()
 };
 
-// Subconjunto do enum Move usado em attributes.h (decision_pkg_cpp) —
-// os números precisam bater com o Move real do robot_behavior.cpp.
+// Subconjunto do enum Move usado em attributes.h (decision_pkg_cpp), com os
+// action_number conferidos contra o switch real de
+// RoboFEI/src/control/src/control.cpp (Control::choose_movement).
 enum GoleiroMove
 {
     g_stand_still    = 1,
     g_turn_right     = 5,
     g_turn_left      = 6,
-    g_squat          = 13,
+    g_squat          = 13, // "Goalkeeper Middle" (control.cpp case 13) — bloqueio central
     g_walk           = 14,
     g_gait           = 15,
     g_stand_up_back  = 16,
     g_stand_up_front = 17,
-    g_stand_up_side  = 18,
     g_walk_left      = 20,
     g_walk_right     = 21,
 
-    // TODO: essas duas ações de queda (mergulho lateral) ainda não existem no
-    // enum Move original (attributes.h do decision_pkg_cpp) — precisam ser
-    // criadas/registradas no pacote de controle. Números abaixo são apenas
-    // placeholders para não colidir com os moves já usados; confirmar com o
-    // time antes de usar em campo.
-    g_dive_left  = 40,
-    g_dive_right = 41
+    // Queda lateral do goleiro e respectivas voltas ao normal — action_number
+    // conferidos em control.cpp (case 11/12/18/19) e nos motion*.json
+    // (RoboFEI/src/control/Data): 11/12 ainda estão sem os passos de
+    // movimento gravados em nenhuma config (ver nota no cabeçalho do .hpp).
+    g_dive_left           = 11, // "Goalkeeper Fall Left"  (control.cpp case 11)
+    g_dive_right          = 12, // "Goalkeeper Fall Right" (control.cpp case 12)
+    g_stand_up_side_left  = 18, // "Fallen Side Left"      (control.cpp case 18)
+    g_stand_up_side_right = 19  // "Fallen Side Right"     (control.cpp case 19)
 };
 
 struct GoleiroNeckPosition
@@ -187,7 +196,7 @@ private:
 
     // --- controle da sequência de queda/agachamento (VerQueda) -------------------
     rclcpp::Time queda_wait_start_;     // marca o instante em que caiu/agachou, p/ contar os 7s
-    GoleiroMove  queda_get_up_move_ = g_stand_up_side; // qual move de levantar usar depois dos 7s
+    GoleiroMove  queda_get_up_move_ = g_stand_up_front; // qual move de levantar usar depois dos 7s
 
     // --- varredura em zigue-zague (search_and_align_ball_M19) --------------------
     // Limites do M19 (pan) onde a varredura inverte de sentido. Valores default

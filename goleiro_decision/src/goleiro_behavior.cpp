@@ -232,8 +232,8 @@ void GoleiroBehavior::VerQueda()
     if (robot.x_count == 1 && (robot.l_count == 2 || robot.l_count == 0))
     {
         RCLCPP_INFO(this->get_logger(), "VerQueda: caso 1 (1X, 2L/0L) -> squat");
-        send_goal(g_squat);
-        queda_get_up_move_ = g_stand_up_side; // TODO: confirmar move de levantar do squat
+        send_goal(g_squat); // "Goalkeeper Middle" (control.cpp case 13) — bloqueio central
+        queda_get_up_move_ = g_stand_up_front; // bloqueio central levanta como uma queda de frente ("Stand Up Front", control.cpp case 17)
     }
     // Caso 2: qualquer outra combinação de landmarks -> cai p/ a direita ou
     // p/ a esquerda de acordo com robot.neck_pos.position19 vs XXXX_3.
@@ -242,14 +242,14 @@ void GoleiroBehavior::VerQueda()
         if (robot.neck_pos.position19 >= XXXX_3)
         {
             RCLCPP_INFO(this->get_logger(), "VerQueda: caso 2 -> queda p/ direita (pos19=%d)", robot.neck_pos.position19);
-            send_goal(g_dive_right); // TODO: confirmar action_number real da queda (não existe ainda em attributes.h)
-            queda_get_up_move_ = g_stand_up_side; // TODO: confirmar move de levantar específico da queda p/ direita
+            send_goal(g_dive_right); // "Goalkeeper Fall Right" (control.cpp case 12)
+            queda_get_up_move_ = g_stand_up_side_right; // "Fallen Side Right" (control.cpp case 19)
         }
         else
         {
             RCLCPP_INFO(this->get_logger(), "VerQueda: caso 2 -> queda p/ esquerda (pos19=%d)", robot.neck_pos.position19);
-            send_goal(g_dive_left); // TODO: confirmar action_number real da queda (não existe ainda em attributes.h)
-            queda_get_up_move_ = g_stand_up_side; // TODO: confirmar move de levantar específico da queda p/ esquerda
+            send_goal(g_dive_left); // "Goalkeeper Fall Left" (control.cpp case 11)
+            queda_get_up_move_ = g_stand_up_side_left; // "Fallen Side Left" (control.cpp case 18)
         }
     }
 

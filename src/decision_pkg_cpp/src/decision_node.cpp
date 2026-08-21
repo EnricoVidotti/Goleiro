@@ -78,11 +78,21 @@ DecisionNode::DecisionNode() : Node("decision_node")
  );
 
  goalpost_count = this->create_subscription<std_msgs::msg::Int32>(
- "goalpost_count", 
+ "goalpost_count",
  rclcpp::QoS(10),
  std::bind(&DecisionNode::listener_callback_goalpost_count, this, _1)
  );
- 
+
+ // Resumo consolidado de landmarks publicado pelo localization_node
+ // (pacote goleiro_decision) no tópico "robot_behavior" — alimenta
+ // robot.l_count/t_count/x_count usados pela FSM do goleiro portada em
+ // RobotBehavior::goalkeeper_normal_game().
+ landmark_summary_subscriber_ = this->create_subscription<LandmarkCountMsg>(
+ "robot_behavior",
+ rclcpp::QoS(10),
+ std::bind(&DecisionNode::listener_callback_landmark_summary, this, _1)
+ );
+
  neck_position_publisher_ = this->create_publisher<JointStateMsg>("set_joint_topic", 10);
 
  neck_control_lock_pub_ = this->create_publisher<std_msgs::msg::Bool>("neck_control_locked", 10);
@@ -241,17 +251,17 @@ void DecisionNode::send_goal(const Move &order)
  // ver se funciona e melhorar lógica depois
  if(order != this->robot.movement)
  {
- if(order == stand_up_back || order == stand_up_front || order == stand_up_side)
+ if(order == stand_up_back || order == stand_up_front || order == stand_up_side_left || order == stand_up_side_right)
  {
  if(goal_handle_ != nullptr && !robot.finished_move)
  {
- if(robot.movement != stand_up_back && robot.movement != stand_up_front && robot.movement != stand_up_side)
+ if(robot.movement != stand_up_back && robot.movement != stand_up_front && robot.movement != stand_up_side_left && robot.movement != stand_up_side_right)
  {
  auto goal_handle_future_ = this->action_client_->async_cancel_goal(goal_handle_);
  goal_handle_future_.wait_for(1500ms);
  }
  }
- if((robot.movement != stand_up_back && robot.movement != stand_up_front && robot.movement != stand_up_side) || robot.finished_move)
+ if((robot.movement != stand_up_back && robot.movement != stand_up_front && robot.movement != stand_up_side_left && robot.movement != stand_up_side_right) || robot.finished_move)
  {
  action_client_->async_send_goal(goal_msg, send_goal_options);
  robot.movement = order;
@@ -310,6 +320,16 @@ void DecisionNode::send_goal(const Move &order)
  void DecisionNode::listener_callback_goalpost_count(const std_msgs::msg::Int32::SharedPtr goalpost_count)
  {
  robot.goalpost_count = *goalpost_count;
+ }
+
+ void DecisionNode::listener_callback_landmark_summary(const LandmarkCountMsg::SharedPtr msg)
+ {
+ // Tópico "robot_behavior" (localization_node): resumo já filtrado,
+ // atualizado a cada 60 frames de visão. msg->goalpost_count não é usado
+ // aqui pois robot.goalpost_count já vem do tópico "goalpost_count" acima.
+ robot.l_count = msg->l_count;
+ robot.t_count = msg->t_count;
+ robot.x_count = msg->x_count;
  }
 
  void DecisionNode::set_neck_position()

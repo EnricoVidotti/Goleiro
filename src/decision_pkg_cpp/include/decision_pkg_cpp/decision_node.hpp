@@ -21,6 +21,7 @@
 // #include "custom_interfaces/msg/neck_position.hpp"
 #include "custom_interfaces/msg/joint_state.hpp"
 #include "custom_interfaces/msg/vision.hpp"
+#include "custom_interfaces/msg/landmark_count.hpp"
 #include "custom_interfaces/action/control.hpp"
 
 #include "std_msgs/msg/int32.hpp"
@@ -40,6 +41,10 @@ class DecisionNode : public rclcpp::Node
         using ImuAccelMsg = sensor_msgs::msg::Imu;
         using VisionMsg = custom_interfaces::msg::Vision;
         using intMsg = std_msgs::msg::Int32;
+        // Resumo de landmarks publicado pelo localization_node (pacote
+        // goleiro_decision) no tópico "robot_behavior" — usado pela FSM do
+        // goleiro portada em RobotBehavior::goalkeeper_normal_game().
+        using LandmarkCountMsg = custom_interfaces::msg::LandmarkCount;
 
         using ControlActionMsg = custom_interfaces::action::Control;
         using GoalHandleControl = rclcpp_action::ClientGoalHandle<ControlActionMsg>;
@@ -67,6 +72,7 @@ class DecisionNode : public rclcpp::Node
         void listener_callback_goalpost_px(const vision_msgs::msg::Point2D::SharedPtr goalpost_px_position); // posição x das traves
         void listener_callback_imu_rpy(const geometry_msgs::msg::Vector3Stamped::SharedPtr rpy);
         void listener_callback_imu_mag(const geometry_msgs::msg::Vector3Stamped::SharedPtr rpy);
+        void listener_callback_landmark_summary(const LandmarkCountMsg::SharedPtr msg); // tópico "robot_behavior" (localization_node)
         void set_neck_position(); // fazer o robo olhar pra cima
         void look_right(); // fazer o robo olhar pra direita
         void look_down_to_ball(); // fazer o robo olhar pra baixo
@@ -127,6 +133,7 @@ class DecisionNode : public rclcpp::Node
         rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr goalpost_count; // quantas traves foram detectadas 
         rclcpp::Subscription<VisionMsg>::SharedPtr goalpost_division_lines; // de acordo com as grades da visao 
         rclcpp::Subscription<vision_msgs::msg::Point2D>::SharedPtr goalpost_px_position;
+        rclcpp::Subscription<LandmarkCountMsg>::SharedPtr landmark_summary_subscriber_;    // "robot_behavior" (localization_node)
         rclcpp::Publisher<JointStateMsg>::SharedPtr neck_position_publisher_;
         rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr neck_control_lock_pub_; // para publicar posições pro pescoço
         rclcpp_action::Client<ControlActionMsg>::SharedPtr action_client_;

@@ -25,6 +25,18 @@ def generate_launch_description():
         robot_config_file
     )
 
+    # robot_number == 1 é o goleiro (mesmo critério de is_goalkeeper() em
+    # decision_pkg_cpp/robot_behavior.cpp — hoje ROBOT_NUMBER é um #define
+    # fixo em robot_behavior.hpp, não este parâmetro). A FSM do goleiro
+    # (antes em goleiro_decision/goleiro_behavior_node) foi portada pra
+    # dentro de decision_pkg_cpp/robot_behavior.cpp, então todo robô roda o
+    # mesmo executável "robot_behavior"; só o goleiro precisa, além disso,
+    # do goleiro_decision/localization_node (publica l_count/t_count/x_count
+    # no tópico "robot_behavior" que a FSM do goleiro consome).
+    #
+    # goleiro_behavior_node NÃO é mais iniciado aqui: rodar os dois nós
+    # (ele e robot_behavior) ao mesmo tempo faria duas decisões concorrentes
+    # disputando o mesmo control_action.
     decision = Node(
         package="decision_pkg_cpp",
         executable="robot_behavior",
@@ -35,6 +47,19 @@ def generate_launch_description():
                    '--log-level',  'rmw_fastrtps_cpp:=info'],
         emulate_tty=True
     )
-
     ld.add_action(decision)
+
+    if robot_number == 1:
+        goleiro_localization = Node(
+            package="goleiro_decision",
+            executable="localization_node",
+            output = 'screen',
+            parameters = [control_config],
+            arguments=['--ros-args', '--log-level', log_level,
+                       '--log-level',  'rcl:=info',
+                       '--log-level',  'rmw_fastrtps_cpp:=info'],
+            emulate_tty=True
+        )
+        ld.add_action(goleiro_localization)
+
     return ld

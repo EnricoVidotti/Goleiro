@@ -23,6 +23,33 @@
   ros__parameters:
     FALL_ACCEL_TH: 7.0
     FALSES_FALLEN_TH: 30
+    # Limiares da FSM do goleiro portada pra decision_pkg_cpp/robot_behavior.cpp
+    # (RobotBehavior::goalkeeper_normal_game) — mesmos placeholders de
+    # goleiro_behavior.cpp/.hpp, AINDA NÃO calibrados em campo. Usa
+    # neck_left_limit/neck_right_limit (bloco /**: acima) pra varredura,
+    # não precisa dos neck_search_left/right_limit do bloco abaixo.
+    danger_area  : 1500  # TODO: calibrar em campo
+    angulo_queda : 1300  # TODO: calibrar em campo
+    xxxx_1       : 2048  # TODO: calibrar em campo (Posicionamento, caso "esquerda")
+    xxxx_2       : 2048  # TODO: calibrar em campo (Posicionamento, caso "direita")
+    xxxx_3       : 2048  # TODO: calibrar em campo (VerQueda, escolha do lado da queda)
+    xxxx_4       : 0     # TODO: calibrar em campo (FindBall2, margem sobre danger_area)
+
+# goleiro_decision (nó separado, pacote goleiro_decision — mantido caso ainda
+# seja usado independentemente de decision_pkg_cpp/robot_behavior.cpp).
+# neck_search_left/right_limit espelham neck_left/right_limit do bloco /**:
+# acima; os demais (danger_area, angulo_queda, xxxx_*) são placeholders do
+# racional em goleiro_behavior.hpp/.cpp — AINDA NÃO calibrados em campo.
+/goleiro_behavior_node:
+  ros__parameters:
+    neck_search_left_limit : 2650
+    neck_search_right_limit: 1150
+    danger_area  : 1500  # TODO: calibrar em campo
+    angulo_queda : 1300  # TODO: calibrar em campo
+    xxxx_1       : 2048  # TODO: calibrar em campo (Posicionamento, caso "esquerda")
+    xxxx_2       : 2048  # TODO: calibrar em campo (Posicionamento, caso "direita")
+    xxxx_3       : 2048  # TODO: calibrar em campo (VerQueda, escolha do lado da queda)
+    xxxx_4       : 0     # TODO: calibrar em campo (FindBall2, margem sobre danger_area)
 
 /image_node:
   ros__parameters:

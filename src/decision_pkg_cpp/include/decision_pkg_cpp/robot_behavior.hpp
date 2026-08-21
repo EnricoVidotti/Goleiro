@@ -56,19 +56,6 @@ class RobotBehavior : public DecisionNode
         void player_penalty();
         void goalkeeper_penalty(); // fazer
 
-        // --- estados internos de goalkeeper_normal_game(), portados de
-        // goleiro_decision/src/goleiro_behavior.cpp (GoleiroBehavior). Usam
-        // robot.gk_state (GoalkeeperState) em vez de robot.state, que
-        // continua exclusivo de bala/kicker. Nomes mantidos próximos aos
-        // originais (Posicionamento/VerQueda/FindBall2/search_and_align_ball_M19)
-        // para facilitar comparação com o arquivo de origem.
-        void goalkeeper_positioning_logic();     // Posicionamento()
-        void goalkeeper_decide_fall();           // VerQueda()
-        void goalkeeper_find_ball_after_fall();  // FindBall2()
-        bool goalkeeper_search_and_align_ball_M19();
-        bool goalkeeper_ball_centered();
-        bool goalkeeper_ball_is_locked();
-
         RobotBehavior();
         virtual ~RobotBehavior();
 
@@ -83,23 +70,27 @@ class RobotBehavior : public DecisionNode
         rclcpp::TimerBase::SharedPtr robot_behavior_;
 
         // --- limiares do goleiro (parâmetros ROS2, mesmos nomes/defaults de
-        // goleiro_behavior.cpp — AINDA NÃO calibrados em campo, ver TODOs lá) ---
-        int DangerArea;   // motor 20: abaixo disso, para de só acompanhar e chama goalkeeper_positioning_logic()
-        int AnguloQueda;  // motor 19/20: abaixo disso, aciona goalkeeper_decide_fall()
-        int XXXX_1;       // TODO: valor indefinido (motor 19) - Posicionamento, caso "andar p/ esquerda"
-        int XXXX_2;       // TODO: valor indefinido (motor 19) - Posicionamento, caso "andar p/ direita"
-        int XXXX_3;       // TODO: valor indefinido (motor 19) - goalkeeper_decide_fall, caso 2: <= cai p/ direita, > XXXX_3+XXXX_4 cai p/ esquerda
-        int XXXX_4;       // TODO: valor indefinido - usado em dois lugares: (1) goalkeeper_find_ball_after_fall,
-                          // margem somada a DangerArea (motor 20); (2) goalkeeper_decide_fall, largura da zona
-                          // intermediária somada a XXXX_3 (motor 19) — entre XXXX_3 e XXXX_3+XXXX_4 agacha no meio
+        // goleiro_behavior.cpp — AINDA NÃO calibrados em campo, ver TODOs lá).
+        // Usados dentro de goalkeeper_normal_game() (goalkeeper_positioning/
+        // goalkeeper_ver_queda/goalkeeper_finding_ball_2), ver robot_behavior.cpp ---
+        int DangerArea;   // motor 20: abaixo disso, para de só acompanhar (goalkeeper_tracking_ball) e passa pra goalkeeper_positioning
+        int AnguloQueda;  // motor 19/20: abaixo disso, decide agachar/cair (goalkeeper_ver_queda)
+        int XXXX_1;       // TODO: valor indefinido (motor 19) - goalkeeper_positioning, caso "andar p/ esquerda"
+        int XXXX_2;       // TODO: valor indefinido (motor 19) - goalkeeper_positioning, caso "andar p/ direita"
+        int XXXX_3;       // TODO: valor indefinido (motor 19) - goalkeeper_ver_queda, caso 2: <= cai p/ direita, > XXXX_3+XXXX_4 cai p/ esquerda
+        int XXXX_4;       // TODO: valor indefinido - usado em dois lugares dentro de goalkeeper_normal_game():
+                          // (1) goalkeeper_finding_ball_2, margem somada a DangerArea (motor 20); (2)
+                          // goalkeeper_ver_queda, largura da zona intermediária somada a XXXX_3 (motor 19)
+                          // — entre XXXX_3 e XXXX_3+XXXX_4 agacha no meio
 
-        // --- controle da sequência de queda/agachamento (goalkeeper_decide_fall) ---
+        // --- controle da sequência de queda/agachamento (estado goalkeeper_queda_esperando) ---
         rclcpp::Time gk_queda_wait_start_;                     // marca o instante em que caiu/agachou, p/ contar os 7s
         Move gk_queda_get_up_move_ = stand_up_front;           // qual move de levantar usar depois dos 7s
 
-        // --- varredura em zigue-zague (goalkeeper_search_and_align_ball_M19) ---
-        // Reaproveita NECK_LEFT_LIMIT/NECK_RIGHT_LIMIT (DecisionNode) como
-        // limites de inversão, mesmos valores usados por goleiro_behavior.cpp.
+        // --- varredura em zigue-zague (lambda local search_and_align_ball_M19
+        // dentro de goalkeeper_normal_game(), usada em goalkeeper_searching_ball
+        // e goalkeeper_finding_ball_2). Reaproveita NECK_LEFT_LIMIT/NECK_RIGHT_LIMIT
+        // (DecisionNode) como limites de inversão, mesmos valores de goleiro_behavior.cpp ---
         bool gk_search_going_left_ = true; // sentido atual da varredura (true = indo p/ esquerda)
 };
 

@@ -86,11 +86,11 @@ enum GoalkeeperState
 {
     goalkeeper_searching_ball   = 1,
     goalkeeper_tracking_ball    = 2, // seguindo a bola só com o motor 20
-    goalkeeper_positioning      = 3, // dentro de goalkeeper_positioning_logic() (Posicionamento())
-    goalkeeper_ver_queda        = 4, // decide e dispara a queda/agachamento (goalkeeper_decide_fall())
+    goalkeeper_positioning      = 3, // case goalkeeper_positioning em goalkeeper_normal_game() (Posicionamento())
+    goalkeeper_ver_queda        = 4, // case goalkeeper_ver_queda: decide e dispara a queda/agachamento (VerQueda())
     goalkeeper_queda_esperando  = 5, // já caiu/agachou, esperando os 7s no chão
     goalkeeper_queda_levantando = 6, // comando de levantar enviado, esperando finished_move
-    goalkeeper_finding_ball_2   = 7  // de pé de novo, dentro de goalkeeper_find_ball_after_fall() (FindBall2())
+    goalkeeper_finding_ball_2   = 7  // de pé de novo, case goalkeeper_finding_ball_2 (FindBall2())
 };
 
 struct NeckPosition
@@ -122,7 +122,8 @@ struct Robot
     GoalkeeperState gk_state = goalkeeper_searching_ball;
     // Resumo de landmarks do tópico "robot_behavior" (localization_node,
     // pacote goleiro_decision, custom_interfaces::msg::LandmarkCount) —
-    // usados por goalkeeper_positioning_logic()/goalkeeper_decide_fall().
+    // usados nos cases goalkeeper_positioning/goalkeeper_ver_queda dentro
+    // de goalkeeper_normal_game().
     int l_count = 0;
     int t_count = 0;
     int x_count = 0;

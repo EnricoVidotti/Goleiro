@@ -659,19 +659,56 @@ void RobotBehavior::bala_localization_game()                //estado de jogo nor
 
 void RobotBehavior::goalkeeper_normal_game() // caso o jogador seja o goleiro
 {
-    // Máquina de estados portada de GoleiroBehavior::goleiro_normal_game()
-    // (goleiro_decision/src/goleiro_behavior.cpp). Usa robot.gk_state
-    // (GoalkeeperState), um campo dedicado — robot.state (State) continua
-    // sendo usado só por bala/kicker, sem risco de colisão de valores.
+    // Máquina de estados do goleiro inteira aqui dentro (nenhuma outra função
+    // void separada) — portada de GoleiroBehavior::goleiro_normal_game() +
+    // Posicionamento()/VerQueda()/FindBall2() (goleiro_decision/src/goleiro_behavior.cpp).
+    // Usa robot.gk_state (GoalkeeperState), campo dedicado — robot.state
+    // (State) continua sendo usado só por bala/kicker, sem colisão de valores.
     RCLCPP_DEBUG(this->get_logger(), "goalkeeper state %d", robot.gk_state);
+
+    // Varredura em zigue-zague com o M19 até achar e centralizar a bola.
+    // Fica como lambda local (não é método da classe) porque é usada em dois
+    // estados (goalkeeper_searching_ball e goalkeeper_finding_ball_2) — assim
+    // não duplica a mesma lógica duas vezes dentro desta função.
+    auto search_and_align_ball_M19 = [this]() -> bool
+    {
+        if (!robot.camera_ball_position.detected)
+        {
+            // Ainda não vê a bola: gira pra um lado até bater no limite
+            // daquele lado, inverte, gira pro outro, e assim por diante.
+            if (gk_search_going_left_)
+            {
+                send_goal(turn_left);
+                if (robot.neck_pos.position19 >= NECK_LEFT_LIMIT) gk_search_going_left_ = false;
+            }
+            else
+            {
+                send_goal(turn_right);
+                if (robot.neck_pos.position19 <= NECK_RIGHT_LIMIT) gk_search_going_left_ = true;
+            }
+            return false;
+        }
+
+        bool centered = robot.camera_ball_position.detected && robot.camera_ball_position.center;
+        if (!centered)
+        {
+            // Vê a bola, mas ainda não está alinhada ao centro (M19) -> gira
+            // para o lado indicado pelo Vision msg até centralizar.
+            if (robot.camera_ball_position.left) send_goal(turn_left);
+            else if (robot.camera_ball_position.right) send_goal(turn_right);
+            return false;
+        }
+
+        return true; // detectada e centralizada -> bola travada
+    };
 
     switch (robot.gk_state)
     {
     case goalkeeper_searching_ball:
-        // 1) Entrar em goalkeeper_searching_ball até fixar a visão na bola:
-        // gira o M19 procurando, alinha ao centro e só então trava.
+        // 1) Entrar aqui até fixar a visão na bola: gira o M19 procurando,
+        // alinha ao centro e só então trava.
         RCLCPP_DEBUG(this->get_logger(), "Goalkeeper: searching_ball");
-        if (goalkeeper_search_and_align_ball_M19())
+        if (search_and_align_ball_M19())
         {
             robot.gk_state = goalkeeper_tracking_ball;
         }
@@ -679,8 +716,10 @@ void RobotBehavior::goalkeeper_normal_game() // caso o jogador seja o goleiro
 
     case goalkeeper_tracking_ball:
         // 2) Enquanto neck_pos.position20 >= DangerArea, só segue a bola com
-        //    o motor 20 (corpo parado).
-        if (!goalkeeper_ball_is_locked())
+        //    o motor 20 (corpo parado). ball_is_locked aqui é a checagem
+        //    simples de detecção do goleiro (sem vision_stable()/lost_ball_timer,
+        //    que são específicos de bala/kicker).
+        if (!robot.camera_ball_position.detected)
         {
             robot.gk_state = goalkeeper_searching_ball;
         }
@@ -691,19 +730,91 @@ void RobotBehavior::goalkeeper_normal_game() // caso o jogador seja o goleiro
         }
         else
         {
-            // 3) neck_pos.position20 <= DangerArea -> chama goalkeeper_positioning_logic()
+            // 3) neck_pos.position20 <= DangerArea -> passa a decidir o posicionamento
             robot.gk_state = goalkeeper_positioning;
         }
         break;
 
     case goalkeeper_positioning:
-        goalkeeper_positioning_logic();
+        // Posicionamento(): casos a/b/c do racional original.
+        if (robot.neck_pos.position20 >= AnguloQueda)
+        {
+            // Caso a) 1 X e (2 L ou 0 L): a bola já chega travada/centralizada
+            // aqui — o robô só continua se aproximando enquanto os dois
+            // motores do pescoço seguem a bola, e decide a queda olhando
+            // direto pro M19.
+            if (robot.x_count == 1 && (robot.l_count == 2 || robot.l_count == 0))
+            {
+                if (robot.neck_pos.position19 <= AnguloQueda) robot.gk_state = goalkeeper_ver_queda;
+                else send_goal(walk); // aproxima-se da bola (M19/M20 seguem sozinhos)
+            }
+            // Caso b) 0 X e 1 L, position19 <= XXXX_1: andar para a esquerda
+            else if (robot.x_count == 0 && robot.l_count == 1 && robot.neck_pos.position19 <= XXXX_1)
+            {
+                if (robot.neck_pos.position19 <= AnguloQueda) robot.gk_state = goalkeeper_ver_queda;
+                else send_goal(walk_left);
+            }
+            // Caso c) 0 X e 1 L, position19 >= XXXX_2: andar para a direita
+            else if (robot.x_count == 0 && robot.l_count == 1 && robot.neck_pos.position19 >= XXXX_2)
+            {
+                if (robot.neck_pos.position19 <= AnguloQueda) robot.gk_state = goalkeeper_ver_queda;
+                else send_goal(walk_right);
+            }
+            else
+            {
+                // Combinação de X/L não coberta pelo racional original.
+                send_goal(stand_still);
+            }
+        }
+        else
+        {
+            // position20 já abaixo do ângulo de queda -> vai direto pra decisão de queda
+            robot.gk_state = goalkeeper_ver_queda;
+        }
         break;
 
     case goalkeeper_ver_queda:
-        // Decide (uma vez) squat ou queda p/ um dos lados, e já entra em
-        // goalkeeper_queda_esperando dentro de goalkeeper_decide_fall().
-        goalkeeper_decide_fall();
+        // VerQueda(): chamada uma única vez ao entrar neste estado — decide o
+        // que fazer (agachar ou cair p/ um lado) e já agenda a espera de 7s.
+
+        // Caso 1: mesma combinação de landmarks do caso (a) acima -> 1 X e
+        // (2 L ou 0 L): agacha (squat) em vez de mergulhar.
+        if (robot.x_count == 1 && (robot.l_count == 2 || robot.l_count == 0))
+        {
+            RCLCPP_INFO(this->get_logger(), "Goalkeeper ver_queda: caso 1 (1X, 2L/0L) -> squat");
+            send_goal(squat); // "Goalkeeper Middle" (control.cpp case 13) — bloqueio central
+            gk_queda_get_up_move_ = stand_up_front; // bloqueio central levanta como uma queda de frente
+        }
+        // Caso 2: qualquer outra combinação de landmarks -> cai p/ a direita,
+        // p/ a esquerda, ou agacha no meio (zona intermediária) de acordo com
+        // robot.neck_pos.position19 vs [XXXX_3, XXXX_3 + XXXX_4].
+        else
+        {
+            if (robot.neck_pos.position19 <= XXXX_3)
+            {
+                RCLCPP_INFO(this->get_logger(), "Goalkeeper ver_queda: caso 2 -> queda p/ direita (pos19=%d)", robot.neck_pos.position19);
+                send_goal(dive_right); // "Goalkeeper Fall Right" (control.cpp case 12)
+                gk_queda_get_up_move_ = stand_up_side_right; // "Fallen Side Right" (control.cpp case 19)
+            }
+            else if (robot.neck_pos.position19 > XXXX_3 + XXXX_4)
+            {
+                RCLCPP_INFO(this->get_logger(), "Goalkeeper ver_queda: caso 2 -> queda p/ esquerda (pos19=%d)", robot.neck_pos.position19);
+                send_goal(dive_left); // "Goalkeeper Fall Left" (control.cpp case 11)
+                gk_queda_get_up_move_ = stand_up_side_left; // "Fallen Side Left" (control.cpp case 18)
+            }
+            else
+            {
+                // Zona intermediária (XXXX_3 < pos19 <= XXXX_3 + XXXX_4): bola
+                // longe demais dos dois lados p/ mergulhar com confiança ->
+                // agacha no meio, igual ao caso 1.
+                RCLCPP_INFO(this->get_logger(), "Goalkeeper ver_queda: caso 2 -> zona intermediária (pos19=%d) -> squat", robot.neck_pos.position19);
+                send_goal(squat); // "Goalkeeper Middle" (control.cpp case 13) — bloqueio central
+                gk_queda_get_up_move_ = stand_up_front; // bloqueio central levanta como uma queda de frente
+            }
+        }
+
+        gk_queda_wait_start_ = this->now();
+        robot.gk_state = goalkeeper_queda_esperando;
         break;
 
     case goalkeeper_queda_esperando:
@@ -720,192 +831,39 @@ void RobotBehavior::goalkeeper_normal_game() // caso o jogador seja o goleiro
         // via result_callback).
         if (robot.finished_move)
         {
-            RCLCPP_DEBUG(this->get_logger(), "Goalkeeper: de pé de novo, chamando goalkeeper_find_ball_after_fall()");
+            RCLCPP_DEBUG(this->get_logger(), "Goalkeeper: de pé de novo, procurando a bola de novo (finding_ball_2)");
             robot.gk_state = goalkeeper_finding_ball_2;
         }
         break;
 
     case goalkeeper_finding_ball_2:
-        goalkeeper_find_ball_after_fall();
+        // FindBall2(): chamada em todo ciclo neste estado. Primeiro precisa
+        // travar a visão na bola de novo; enquanto não trava, permanece aqui.
+        if (search_and_align_ball_M19())
+        {
+            if (robot.neck_pos.position20 <= (DangerArea + XXXX_4))
+            {
+                // Já está dentro de DangerArea (+ margem XXXX_4) -> passa a
+                // decidir o posicionamento já no próximo ciclo.
+                RCLCPP_INFO(this->get_logger(),
+                    "Goalkeeper finding_ball_2: pos20=%d <= DangerArea(%d)+XXXX_4(%d) -> positioning",
+                    robot.neck_pos.position20, DangerArea, XXXX_4);
+                robot.gk_state = goalkeeper_positioning;
+            }
+            else
+            {
+                // Ainda longe (considerando a margem): volta a acompanhar a
+                // bola com o motor 20 (goalkeeper_tracking_ball), que por si
+                // só já transiciona pra goalkeeper_positioning assim que
+                // M20 <= DangerArea (sem a margem extra).
+                RCLCPP_DEBUG(this->get_logger(),
+                    "Goalkeeper finding_ball_2: pos20=%d ainda acima do limite -> tracking_ball",
+                    robot.neck_pos.position20);
+                robot.gk_state = goalkeeper_tracking_ball;
+            }
+        }
         break;
     }
-}
-
-// ---------------------------------------------------------------------------
-// goalkeeper_positioning_logic(): porta Posicionamento() de goleiro_behavior.cpp
-// ---------------------------------------------------------------------------
-void RobotBehavior::goalkeeper_positioning_logic()
-{
-    if (robot.neck_pos.position20 >= AnguloQueda)
-    {
-        // Caso a) 1 X e (2 L ou 0 L): a bola já chega travada/centralizada
-        // aqui — o robô só continua se aproximando enquanto os dois motores
-        // do pescoço seguem a bola, e decide a queda olhando direto pro M19.
-        if (robot.x_count == 1 && (robot.l_count == 2 || robot.l_count == 0))
-        {
-            if (robot.neck_pos.position19 <= AnguloQueda) robot.gk_state = goalkeeper_ver_queda;
-            else send_goal(walk); // aproxima-se da bola (M19/M20 seguem sozinhos)
-        }
-        // Caso b) 0 X e 1 L, position19 <= XXXX_1: andar para a esquerda
-        else if (robot.x_count == 0 && robot.l_count == 1 && robot.neck_pos.position19 <= XXXX_1)
-        {
-            if (robot.neck_pos.position19 <= AnguloQueda) robot.gk_state = goalkeeper_ver_queda;
-            else send_goal(walk_left);
-        }
-        // Caso c) 0 X e 1 L, position19 >= XXXX_2: andar para a direita
-        else if (robot.x_count == 0 && robot.l_count == 1 && robot.neck_pos.position19 >= XXXX_2)
-        {
-            if (robot.neck_pos.position19 <= AnguloQueda) robot.gk_state = goalkeeper_ver_queda;
-            else send_goal(walk_right);
-        }
-        else
-        {
-            // Combinação de X/L não coberta pelo racional original.
-            send_goal(stand_still);
-        }
-    }
-    else
-    {
-        // position20 já abaixo do ângulo de queda -> vai direto pra decisão de queda
-        robot.gk_state = goalkeeper_ver_queda;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// goalkeeper_decide_fall(): porta VerQueda() de goleiro_behavior.cpp
-// ---------------------------------------------------------------------------
-void RobotBehavior::goalkeeper_decide_fall()
-{
-    // Chamada uma única vez ao entrar no estado goalkeeper_ver_queda: decide
-    // o que fazer (agachar ou cair p/ um lado) e já agenda a espera de 7s.
-
-    // Caso 1: mesma combinação de landmarks do caso (a) de
-    // goalkeeper_positioning_logic() -> 1 X e (2 L ou 0 L): agacha (squat)
-    // em vez de mergulhar.
-    if (robot.x_count == 1 && (robot.l_count == 2 || robot.l_count == 0))
-    {
-        RCLCPP_INFO(this->get_logger(), "Goalkeeper decide_fall: caso 1 (1X, 2L/0L) -> squat");
-        send_goal(squat); // "Goalkeeper Middle" (control.cpp case 13) — bloqueio central
-        gk_queda_get_up_move_ = stand_up_front; // bloqueio central levanta como uma queda de frente
-    }
-    // Caso 2: qualquer outra combinação de landmarks -> cai p/ a direita, p/
-    // a esquerda, ou agacha no meio (zona intermediária) de acordo com
-    // robot.neck_pos.position19 vs [XXXX_3, XXXX_3 + XXXX_4].
-    else
-    {
-        if (robot.neck_pos.position19 <= XXXX_3)
-        {
-            RCLCPP_INFO(this->get_logger(), "Goalkeeper decide_fall: caso 2 -> queda p/ direita (pos19=%d)", robot.neck_pos.position19);
-            send_goal(dive_right); // "Goalkeeper Fall Right" (control.cpp case 12)
-            gk_queda_get_up_move_ = stand_up_side_right; // "Fallen Side Right" (control.cpp case 19)
-        }
-        else if (robot.neck_pos.position19 > XXXX_3 + XXXX_4)
-        {
-            RCLCPP_INFO(this->get_logger(), "Goalkeeper decide_fall: caso 2 -> queda p/ esquerda (pos19=%d)", robot.neck_pos.position19);
-            send_goal(dive_left); // "Goalkeeper Fall Left" (control.cpp case 11)
-            gk_queda_get_up_move_ = stand_up_side_left; // "Fallen Side Left" (control.cpp case 18)
-        }
-        else
-        {
-            // Zona intermediária (XXXX_3 < pos19 <= XXXX_3 + XXXX_4): bola
-            // longe demais dos dois lados p/ mergulhar com confiança -> agacha
-            // no meio, igual ao caso 1.
-            RCLCPP_INFO(this->get_logger(), "Goalkeeper decide_fall: caso 2 -> zona intermediária (pos19=%d) -> squat", robot.neck_pos.position19);
-            send_goal(squat); // "Goalkeeper Middle" (control.cpp case 13) — bloqueio central
-            gk_queda_get_up_move_ = stand_up_front; // bloqueio central levanta como uma queda de frente
-        }
-    }
-
-    gk_queda_wait_start_ = this->now();
-    robot.gk_state = goalkeeper_queda_esperando;
-}
-
-// ---------------------------------------------------------------------------
-// goalkeeper_find_ball_after_fall(): porta FindBall2() de goleiro_behavior.cpp
-// ---------------------------------------------------------------------------
-void RobotBehavior::goalkeeper_find_ball_after_fall()
-{
-    // Chamada em todo ciclo enquanto robot.gk_state == goalkeeper_finding_ball_2.
-    // Primeiro precisa travar a visão na bola de novo.
-    if (!goalkeeper_search_and_align_ball_M19())
-    {
-        return; // permanece em goalkeeper_finding_ball_2 até a bola travar
-    }
-
-    if (robot.neck_pos.position20 <= (DangerArea + XXXX_4))
-    {
-        // Já está dentro de DangerArea (+ margem XXXX_4) -> aciona
-        // goalkeeper_positioning_logic() imediatamente.
-        RCLCPP_INFO(this->get_logger(),
-            "Goalkeeper find_ball_after_fall: pos20=%d <= DangerArea(%d)+XXXX_4(%d) -> positioning",
-            robot.neck_pos.position20, DangerArea, XXXX_4);
-        robot.gk_state = goalkeeper_positioning;
-        goalkeeper_positioning_logic();
-    }
-    else
-    {
-        // Ainda longe (considerando a margem): volta a acompanhar a bola com
-        // o motor 20 (goalkeeper_tracking_ball), que por si só já transiciona
-        // pra goalkeeper_positioning assim que M20 <= DangerArea.
-        RCLCPP_DEBUG(this->get_logger(),
-            "Goalkeeper find_ball_after_fall: pos20=%d ainda acima do limite -> tracking_ball",
-            robot.neck_pos.position20);
-        robot.gk_state = goalkeeper_tracking_ball;
-    }
-}
-
-// ---------------------------------------------------------------------------
-bool RobotBehavior::goalkeeper_ball_is_locked()
-{
-    // Porta GoleiroBehavior::ball_is_locked() — checagem simples de detecção
-    // (sem exigir vision_stable()/lost_ball_timer como o ball_is_locked()
-    // de bala/kicker; a FSM do goleiro não usa MAX_LOST_BALL_TIME).
-    return robot.camera_ball_position.detected;
-}
-
-bool RobotBehavior::goalkeeper_ball_centered()
-{
-    return robot.camera_ball_position.detected && robot.camera_ball_position.center;
-}
-
-bool RobotBehavior::goalkeeper_search_and_align_ball_M19()
-{
-    // Porta GoleiroBehavior::search_and_align_ball_M19().
-    if (!robot.camera_ball_position.detected)
-    {
-        // Ainda não vê a bola: varredura em zigue-zague com o M19 -> gira pra
-        // um lado até bater no limite daquele lado, inverte, gira pro outro
-        // lado até bater no limite dele, inverte de novo, e assim por diante.
-        if (gk_search_going_left_)
-        {
-            send_goal(turn_left);
-            if (robot.neck_pos.position19 >= NECK_LEFT_LIMIT)
-            {
-                gk_search_going_left_ = false; // bateu no limite esquerdo -> inverte pra direita
-            }
-        }
-        else
-        {
-            send_goal(turn_right);
-            if (robot.neck_pos.position19 <= NECK_RIGHT_LIMIT)
-            {
-                gk_search_going_left_ = true; // bateu no limite direito -> inverte pra esquerda
-            }
-        }
-        return false;
-    }
-
-    if (!goalkeeper_ball_centered())
-    {
-        // Vê a bola, mas ainda não está alinhada ao centro (M19) -> gira
-        // para o lado indicado pelo Vision msg até centralizar.
-        if (robot.camera_ball_position.left) send_goal(turn_left);
-        else if (robot.camera_ball_position.right) send_goal(turn_right);
-        return false;
-    }
-
-    // Detectada e centralizada -> bola travada.
-    return true;
 }
 
 void RobotBehavior::player_penalty()
